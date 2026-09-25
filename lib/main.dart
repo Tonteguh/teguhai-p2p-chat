@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'features/chat/chat_screen.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:intl/intl.dart';
+import 'dart:io';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await Supabase.initialize(
     url: 'https://uktplqoiugaudoikkby.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVrdHBscW9pdWdhdWRvaWtiYnkiLCJuYW1lIjoiU3VwYWJhc2UgUHJvamVjdCIsInJvbGUiOiJhbm9uIn0.8A5ZQzXyC12vF0sQZfY5JQeKdL2XqM7s9tK6vR7eN8',
   );
-  
+
   runApp(const TeguhAiApp());
 }
 
@@ -24,6 +27,7 @@ class TeguhAiApp extends StatelessWidget {
         primarySwatch: Colors.green,
         useMaterial3: true,
       ),
+      debugShowCheckedModeBanner: false,
       home: const AuthGate(),
     );
   }
@@ -45,6 +49,7 @@ class AuthGate extends StatelessWidget {
   }
 }
 
+// ===================== LAYAR MASUK / DAFTAR =====================
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -53,202 +58,77 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // === MODE ===
   bool _isLoginMode = true;
   bool _isForgotMode = false;
-  bool _isVerifyMode = false;
-  
-  // === PILIHAN KIRIM OTP ===
-  int? _otpChannel; // 0=WA, 1=SMS, 2=Email
-
-  // === SANDI MATA ===
   bool _obscurePass = true;
   bool _obscureConfirm = true;
 
-  // === INPUT ===
-  final TextEditingController _kontakController = TextEditingController();
-  final TextEditingController _namaController = TextEditingController();
-  final TextEditingController _passController = TextEditingController();
-  final TextEditingController _confirmPassController = TextEditingController();
-  final TextEditingController _otpController = TextEditingController();
+  final _usernameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  final _confirmPassCtrl = TextEditingController();
 
-  String? _nomorTersimpan;
-  String? _emailTersimpan;
   bool _isLoading = false;
 
-  // === NORMALISASI NOMOR HP ===
-  String _formatNoHp(String input) {
-    String no = input.trim();
-    if (no.startsWith('0')) no = no.substring(1);
-    if (!no.startsWith('+')) no = '+62$no';
-    return no;
+  void _pesan(String teks) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(teks),
+      duration: const Duration(seconds: 3),
+    ));
   }
 
-  // === KIRIM OTP BERDASARKAN PILIHAN ===
-  Future<void> _kirimOTP() async {
-    final kontak = _kontakController.text.trim();
-    if (kontak.isEmpty || _otpChannel == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Isi kontak & pilih cara kirim kode')),
-      );
-      return;
-    }
-
-    setState(() => _isLoading = true);
-
-    try {
-      if (_otpChannel == 2) {
-        // EMAIL
-        await Supabase.instance.client.auth.resetPasswordForEmail(kontak);
-        _emailTersimpan = kontak;
-      } else {
-        // WA atau SMS — pakai nomor HP
-        final noHp = _formatNoHp(kontak);
-        await Supabase.instance.client.auth.signInWithOtp(phone: noHp);
-        _nomorTersimpan = noHp;
-      }
-
-      setState(() => _isVerifyMode = true);
-
-      String cara = '';
-      switch (_otpChannel) {
-        case 0: cara = 'WhatsApp'; break;
-        case 1: cara = 'SMS'; break;
-        case 2: cara = 'Email'; break;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kode dikirim lewat $cara ✅ Cek segera!')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal kirim: $e')),
-        );
-      }
-    }
-
-    setState(() => _isLoading = false);
-  }
-
-  // === VERIFIKASI OTP ===
-  Future<void> _cekOTP() async {
-    final kode = _otpController.text.trim();
-    if (kode.isEmpty) return;
-
-    setState(() => _isLoading = true);
-
-    try {
-      if (_otpChannel == 2 && _emailTersimpan != null) {
-        // Email — untuk reset, langsung lanjut buat sandi baru
-        await Supabase.instance.client.auth.verifyOTP(
-          email: _emailTersimpan!,
-          token: kode,
-          type: OtpType.recovery,
-        );
-      } else if (_nomorTersimpan != null) {
-        // HP — WA/SMS
-        await Supabase.instance.client.auth.verifyOTP(
-          phone: _nomorTersimpan!,
-          token: kode,
-          type: OtpType.sms,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kode salah/kadaluarsa: $e')),
-        );
-      }
-    }
-
-    setState(() => _isLoading = false);
-  }
-
-  // === DAFTAR ===
   Future<void> _daftar() async {
-    if (_passController.text != _confirmPassController.text) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sandi tidak cocok! ❌')),
-      );
+    if (_passCtrl.text != _confirmPassCtrl.text) {
+      _pesan('Sandi tidak cocok! ❌');
       return;
     }
-    if (_passController.text.length < 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sandi minimal 6 karakter')),
-      );
+    if (_passCtrl.text.length < 6) {
+      _pesan('Sandi minimal 6 karakter!');
       return;
     }
 
     setState(() => _isLoading = true);
     try {
-      final nama = _namaController.text.trim();
-      final kontak = _kontakController.text.trim();
-
-      if (kontak.contains('@')) {
-        // Daftar pakai Email
-        await Supabase.instance.client.auth.signUp(
-          email: kontak,
-          password: _passController.text,
-          data: {'name': nama},
-        );
-      } else {
-        // Daftar pakai No HP
-        await Supabase.instance.client.auth.signUp(
-          phone: _formatNoHp(kontak),
-          password: _passController.text,
-          data: {'name': nama},
-        );
-      }
-
-      final uid = Supabase.instance.client.auth.currentUser?.id;
-      if (uid != null) {
-        await Supabase.instance.client.from('profiles').upsert({
-          'id': uid,
-          'name': nama,
-        });
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Berhasil daftar! 🎉')),
-        );
-      }
+      await Supabase.instance.client.auth.signUp(
+        email: _emailCtrl.text.trim(),
+        password: _passCtrl.text.trim(),
+        data: {'username': _usernameCtrl.text.trim()},
+      );
+      _pesan('Berhasil daftar! ✅ Silakan masuk');
+      setState(() => _isLoginMode = true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal daftar: $e')),
-        );
-      }
+      _pesan('Gagal daftar: $e');
     }
     setState(() => _isLoading = false);
   }
 
-  // === MASUK ===
   Future<void> _masuk() async {
     setState(() => _isLoading = true);
     try {
-      final kontak = _kontakController.text.trim();
-
-      if (kontak.contains('@')) {
-        await Supabase.instance.client.auth.signInWithPassword(
-          email: kontak,
-          password: _passController.text,
-        );
-      } else {
-        await Supabase.instance.client.auth.signInWithPassword(
-          phone: _formatNoHp(kontak),
-          password: _passController.text,
-        );
-      }
+      await Supabase.instance.client.auth.signInWithPassword(
+        email: _emailCtrl.text.trim(),
+        password: _passCtrl.text.trim(),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal masuk: $e')),
-        );
-      }
+      _pesan('Gagal masuk: $e');
+    }
+    setState(() => _isLoading = false);
+  }
+
+  Future<void> _kirimReset() async {
+    if (_emailCtrl.text.trim().isEmpty) {
+      _pesan('Isi email dulu!');
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        _emailCtrl.text.trim(),
+      );
+      _pesan('Kode dikirim! Cek email ✅');
+      setState(() => _isForgotMode = false);
+    } catch (e) {
+      _pesan('Gagal: $e');
     }
     setState(() => _isLoading = false);
   }
@@ -259,100 +139,32 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: Colors.green.shade50,
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(24),
           child: SingleChildScrollView(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.psychology, size: 70, color: Colors.green),
                 const SizedBox(height: 12),
                 const Text('TeguhAi', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.green)),
                 const SizedBox(height: 24),
 
-                // === LAYAR VERIFIKASI OTP ===
-                if (_isVerifyMode) ...[
-                  const Text('Masukkan Kode OTP', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Text('Kode dikirim lewat ${_otpChannel == 0 ? "WhatsApp" : _otpChannel == 1 ? "SMS" : "Email"}',
-                      style: const TextStyle(color: Colors.grey)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _otpController,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 24, letterSpacing: 10),
-                    decoration: const InputDecoration(
-                      labelText: 'Kode 6 angka',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : () async {
-                        await _cekOTP();
-                        // Kalau dari lupa sandi & berhasil → tampilkan buat sandi baru
-                        if (_isForgotMode && Supabase.instance.client.auth.currentUser != null) {
-                          setState(() {
-                            _isVerifyMode = false;
-                            // Tetap di lupa mode untuk ubah sandi
-                          });
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text(_isLoading ? 'Memproses...' : 'Verifikasi Kode', style: const TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _isVerifyMode = false;
-                        _otpChannel = null;
-                      });
-                    },
-                    child: const Text('← Kembali'),
-                  ),
-
-                // === LAYAR LUPA SANDI — PILIHAN KIRIM ===
-                ] else if (_isForgotMode) ...[
+                if (_isForgotMode) ...[
                   const Text('Lupa Kata Sandi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  const Text('Masukkan nomor atau email, lalu pilih cara kirim kode',
-                      textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
                   const SizedBox(height: 20),
-
                   TextField(
-                    controller: _kontakController,
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
-                      labelText: 'Nomor HP / Email',
-                      prefixIcon: Icon(Icons.alternate_email),
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.email),
                       border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                      hintText: '0812... atau email@contoh.com',
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  const Text('Pilih cara terima kode:', style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-
-                  // === 3 PILIHAN ===
-                  _buildPilihanOTP(0, '💬 WhatsApp'),
-                  const SizedBox(height: 8),
-                  _buildPilihanOTP(1, '📱 SMS'),
-                  const SizedBox(height: 8),
-                  _buildPilihanOTP(2, '✉️ Email'),
-
                   const SizedBox(height: 20),
-
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _kirimOTP,
+                      onPressed: _isLoading ? null : _kirimReset,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         backgroundColor: Colors.orange,
@@ -361,122 +173,41 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: Text(_isLoading ? 'Mengirim...' : 'Kirim Kode', style: const TextStyle(fontSize: 16)),
                     ),
                   ),
-
-                  // === BUAT SANDI BARU JIKA SUDAH VERIFIKASI ===
-                  if (Supabase.instance.client.auth.currentUser != null) ...[
-                    const SizedBox(height: 24),
-                    const Text('Buat Sandi Baru', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _passController,
-                      obscureText: _obscurePass,
-                      decoration: InputDecoration(
-                        labelText: 'Sandi Baru',
-                        prefixIcon: const Icon(Icons.lock),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility),
-                          onPressed: () => setState(() => _obscurePass = !_obscurePass),
-                        ),
-                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _confirmPassController,
-                      obscureText: _obscureConfirm,
-                      decoration: InputDecoration(
-                        labelText: 'Ulangi Sandi Baru',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility),
-                          onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                        ),
-                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : () async {
-                          if (_passController.text == _confirmPassController.text) {
-                            setState(() => _isLoading = true);
-                            try {
-                              await Supabase.instance.client.auth.updateUser(
-                                UserAttributes(password: _passController.text),
-                              );
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Sandi berhasil diubah! ✅')),
-                                );
-                                setState(() {
-                                  _isForgotMode = false;
-                                  _isLoginMode = true;
-                                });
-                              }
-                            } catch (e) {
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Gagal ubah sandi: $e')),
-                                );
-                              }
-                            }
-                            setState(() => _isLoading = false);
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Sandi tidak cocok!')),
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Simpan Sandi Baru', style: TextStyle(fontSize: 16)),
-                      ),
-                    ),
-                  ],
-
                   TextButton(
-                    onPressed: () => setState(() {
-                      _isForgotMode = false;
-                      _otpChannel = null;
-                    }),
-                    child: const Text('← Kembali ke Masuk'),
+                    onPressed: () => setState(() => _isForgotMode = false),
+                    child: const Text('← Kembali'),
                   ),
-
-                // === LAYAR UTAMA — MASUK / DAFTAR ===
                 ] else ...[
-                  Text(_isLoginMode ? 'Masuk ke Akun' : 'Daftar Akun Baru',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  Text(
+                    _isLoginMode ? 'Masuk ke Akun' : 'Daftar Akun Baru',
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 20),
 
-                  if (!_isLoginMode) ...[
+                  if (!_isLoginMode)
                     TextField(
-                      controller: _namaController,
+                      controller: _usernameCtrl,
                       decoration: const InputDecoration(
-                        labelText: 'Nama Lengkap',
+                        labelText: 'Nama Pengguna',
                         prefixIcon: Icon(Icons.person),
                         border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
                       ),
                     ),
-                    const SizedBox(height: 12),
-                  ],
+                  if (!_isLoginMode) const SizedBox(height: 12),
 
                   TextField(
-                    controller: _kontakController,
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
-                      labelText: 'Nomor HP / Email',
-                      prefixIcon: Icon(Icons.contact_page),
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.email),
                       border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                      hintText: '0812... atau email@contoh.com',
                     ),
                   ),
                   const SizedBox(height: 12),
 
                   TextField(
-                    controller: _passController,
+                    controller: _passCtrl,
                     obscureText: _obscurePass,
                     decoration: InputDecoration(
                       labelText: 'Kata Sandi',
@@ -492,10 +223,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   if (!_isLoginMode)
                     TextField(
-                      controller: _confirmPassController,
+                      controller: _confirmPassCtrl,
                       obscureText: _obscureConfirm,
                       decoration: InputDecoration(
-                        labelText: 'Konfirmasi Kata Sandi',
+                        labelText: 'Ulangi Sandi',
                         prefixIcon: const Icon(Icons.lock_outline),
                         suffixIcon: IconButton(
                           icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility),
@@ -514,4 +245,337 @@ class _LoginScreenState extends State<LoginScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.cir
+                      ),
+                      child: Text(
+                        _isLoading ? 'Memproses...' : (_isLoginMode ? 'Masuk' : 'Daftar'),
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  if (_isLoginMode)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => setState(() => _isForgotMode = true),
+                        child: const Text('Lupa Kata Sandi?'),
+                      ),
+                    ),
+
+                  TextButton(
+                    onPressed: () => setState(() => _isLoginMode = !_isLoginMode),
+                    child: Text(_isLoginMode
+                        ? 'Belum punya akun? Daftar Baru'
+                        : 'Sudah punya akun? Masuk Sini'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===================== LAYAR UTAMA =====================
+class MainScaffold extends StatefulWidget {
+  const MainScaffold({super.key});
+
+  @override
+  State<MainScaffold> createState() => _MainScaffoldState();
+}
+
+class _MainScaffoldState extends State<MainScaffold> {
+  int _selectedIndex = 0;
+
+  final List<Widget> _layar = const [
+    DaftarObrolanScreen(),
+    PanggilanScreen(),
+    VideoCallScreen(),
+    PengaturanScreen(),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('TeguhAi — Obrolan'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await Supabase.instance.client.auth.signOut();
+            },
+          ),
+        ],
+      ),
+      body: _layar[_selectedIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        selectedItemColor: Colors.green,
+        type: BottomNavigationBarType.fixed,
+        onTap: (i) => setState(() => _selectedIndex = i),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.chat), label: 'Obrolan'),
+          BottomNavigationBarItem(icon: Icon(Icons.phone), label: 'Telp'),
+          BottomNavigationBarItem(icon: Icon(Icons.videocam), label: 'Video'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Pengaturan'),
+        ],
+      ),
+    );
+  }
+}
+
+// ===================== DAFTAR OBROLAN =====================
+class DaftarObrolanScreen extends StatefulWidget {
+  const DaftarObrolanScreen({super.key});
+
+  @override
+  State<DaftarObrolanScreen> createState() => _DaftarObrolanScreenState();
+}
+
+class _DaftarObrolanScreenState extends State<DaftarObrolanScreen> {
+  final _pencarianCtrl = TextEditingController();
+  List<Map<String, dynamic>> _daftarPengguna = [];
+  bool _sedangCari = false;
+
+  Future<void> _cariPengguna(String kata) async {
+    if (kata.isEmpty) {
+      setState(() {
+        _sedangCari = false;
+        _daftarPengguna.clear();
+      });
+      return;
+    }
+    setState(() => _sedangCari = true);
+    try {
+      final res = await Supabase.instance.client
+          .from('profiles')
+          .select()
+          .ilike('username', '%$kata%')
+          .limit(15);
+      setState(() => _daftarPengguna = List<Map<String, dynamic>>.from(res));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal cari: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _pencarianCtrl,
+            decoration: InputDecoration(
+              labelText: 'Cari teman...',
+              prefixIcon: const Icon(Icons.search),
+              border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+            onChanged: _cariPengguna,
+          ),
+        ),
+
+        Expanded(
+          child: _sedangCari && _daftarPengguna.isNotEmpty
+              ? ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: _daftarPengguna.length,
+                  itemBuilder: (ctx, i) {
+                    final p = _daftarPengguna[i];
+                    return ListTile(
+                      leading: const CircleAvatar(child: Icon(Icons.person, color: Colors.white)),
+                      title: Text(p['username'] ?? 'Pengguna'),
+                      subtitle: Text(p['email'] ?? ''),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ChatRoomScreen(teman: p),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                )
+              : const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.chat_bubble_outline, size: 60, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('Cari teman dengan nama pengguna untuk mulai obrolan 💬',
+                          textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+                    ],
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ===================== RUANG OBROLAN =====================
+class ChatRoomScreen extends StatefulWidget {
+  final Map<String, dynamic> teman;
+  const ChatRoomScreen({super.key, required this.teman});
+
+  @override
+  State<ChatRoomScreen> createState() => _ChatRoomScreenState();
+}
+
+class _ChatRoomScreenState extends State<ChatRoomScreen> {
+  final _pesanCtrl = TextEditingController();
+  final _scrollKontrol = ScrollController();
+  List<Map<String, dynamic>> _daftarPesan = [];
+  bool _tampilEmoji = false;
+  final ImagePicker _pilihGambar = ImagePicker();
+  String? _idObrolan;
+
+  @override
+  void initState() {
+    super.initState();
+    _muatAtauBuatObrolan();
+  }
+
+  Future<void> _muatAtauBuatObrolan() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    final temanId = widget.teman['id'];
+    if (uid == null || temanId == null) return;
+
+    try {
+      // Cek obrolan sudah ada
+      final cek = await Supabase.instance.client
+          .from('conversations')
+          .select()
+          .or('and(user1_id.eq.$uid,user2_id.eq.$temanId),and(user1_id.eq.$temanId,user2_id.eq.$uid)')
+          .maybeSingle();
+
+      if (cek != null) {
+        _idObrolan = cek['id'];
+        _muatPesan();
+      } else {
+        // Buat baru
+        final baru = await Supabase.instance.client.from('conversations').insert({
+          'user1_id': uid,
+          'user2_id': temanId,
+        }).select().single();
+        _idObrolan = baru['id'];
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Kesalahan obrolan: $e')),
+      );
+    }
+  }
+
+  Future<void> _muatPesan() async {
+    if (_idObrolan == null) return;
+    try {
+      final res = await Supabase.instance.client
+          .from('messages')
+          .select()
+          .eq('conversation_id', _idObrolan!)
+          .order('created_at', ascending: true);
+      setState(() => _daftarPesan = List<Map<String, dynamic>>.from(res));
+      _gulirBawah();
+    } catch (e) {
+      debugPrint('Gagal muat pesan: $e');
+    }
+  }
+
+  Future<void> _kirimPesan({String? tipe, String? mediaUrl}) async {
+    final teks = _pesanCtrl.text.trim();
+    if (teks.isEmpty && mediaUrl == null) return;
+    if (_idObrolan == null) return;
+
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null) return;
+
+    try {
+      await Supabase.instance.client.from('messages').insert({
+        'conversation_id': _idObrolan,
+        'sender_id': uid,
+        'message_type': tipe ?? 'text',
+        'content': teks.isNotEmpty ? teks : null,
+        'media_url': mediaUrl,
+      });
+
+      // Perbarui info terakhir di obrolan
+      await Supabase.instance.client.from('conversations').update({
+        'last_message': teks.isNotEmpty ? teks : '[Gambar]',
+        'last_message_time': DateTime.now().toIso8601String(),
+      }).eq('id', _idObrolan!);
+
+      _pesanCtrl.clear();
+      _muatPesan();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal kirim: $e')),
+      );
+    }
+  }
+
+  Future<void> _pilihKirimGambar() async {
+    final file = await _pilihGambar.pickImage(source: ImageSource.gallery);
+    if (file == null) return;
+    _kirimPesan(tipe: 'image', mediaUrl: file.path);
+  }
+
+  void _gulirBawah() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollKontrol.hasClients) {
+        _scrollKontrol.animateTo(
+          _scrollKontrol.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.teman['username'] ?? 'Obrolan'),
+        backgroundColor: Colors.green,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(icon: const Icon(Icons.phone), onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Panggilan suara — Segera hadir 📞')),
+            );
+          }),
+          IconButton(icon: const Icon(Icons.videocam), onPressed: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Panggilan video — Segera hadir 📹')),
+            );
+          }),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: _idObrolan == null
+                ? const Center(child: CircularProgressIndicator())
+                : _daftarPesan.isEmpty
+                    ? const Center(child: Text('Belum ada pesan. Sapa duluan! 👋'))
+                    : ListView.builder(
+                        controller: _scrollKontrol,
+                        padding: const EdgeInsets.all(12),
+                        itemCount: _daftarPesan.length,
+                        itemBuilder: (ctx, i) {
+                          final p = _daftarPesan[i];
+                          final saya = p['sender_id'] == Supabase.instance.client.auth.currentUser?.id;
+                          final waktu = p['created_at'] != null
+                              ? DateFormat('HH:mm').format(D
