@@ -9,29 +9,14 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations:
-    sdk: flutter
 
-  # 🔐 Supabase — Koneksi Database & Login
   supabase_flutter: ^2.5.17
-
-  # 📸 Kirim Gambar / Foto
   image_picker: ^1.1.2
-
-  # 📄 Kirim Dokumen / File
-  file_picker: ^8.1.2
-
-  # 😊 Pilih & Kirim Emoji
   emoji_picker_flutter: ^2.3.0
-
-  # 📞 Panggilan Suara & Video (siap dipakai nanti)
-  flutter_webrtc: ^0.11.6
-
-  # 🔗 Buka Tautan / Eksternal
-  url_launcher: ^6.3.0
-
-  # ⏰ Format Waktu & Tanggal
   intl: ^0.19.0
+  file_picker: ^8.1.2
+  flutter_webrtc: ^0.11.6
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
