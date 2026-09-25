@@ -53,119 +53,131 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // === PILIHAN TAB ===
-  int _selectedAuthTab = 0; // 0 = No HP, 1 = Email
+  // === MODE ===
   bool _isLoginMode = true;
   bool _isForgotMode = false;
-  bool _isVerifyOtpMode = false;
+  bool _isVerifyMode = false;
+  
+  // === PILIHAN KIRIM OTP ===
+  int? _otpChannel; // 0=WA, 1=SMS, 2=Email
 
-  // === PENGATURAN SANDI MATA ===
+  // === SANDI MATA ===
   bool _obscurePass = true;
   bool _obscureConfirm = true;
 
-  // === KONTROL INPUT ===
-  final TextEditingController _noHpController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
+  // === INPUT ===
+  final TextEditingController _kontakController = TextEditingController();
   final TextEditingController _namaController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
   final TextEditingController _confirmPassController = TextEditingController();
   final TextEditingController _otpController = TextEditingController();
 
-  String? _verificationId;
-  String? _resetTarget;
+  String? _nomorTersimpan;
+  String? _emailTersimpan;
   bool _isLoading = false;
 
-  // === KIRIM OTP UNTUK DAFTAR/LOGIN ===
-  Future<void> _sendOtp() async {
-    final contact = _selectedAuthTab == 0 
-        ? _noHpController.text.trim() 
-        : _emailController.text.trim();
-    if (contact.isEmpty) return;
+  // === NORMALISASI NOMOR HP ===
+  String _formatNoHp(String input) {
+    String no = input.trim();
+    if (no.startsWith('0')) no = no.substring(1);
+    if (!no.startsWith('+')) no = '+62$no';
+    return no;
+  }
+
+  // === KIRIM OTP BERDASARKAN PILIHAN ===
+  Future<void> _kirimOTP() async {
+    final kontak = _kontakController.text.trim();
+    if (kontak.isEmpty || _otpChannel == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Isi kontak & pilih cara kirim kode')),
+      );
+      return;
+    }
 
     setState(() => _isLoading = true);
+
     try {
-      if (_selectedAuthTab == 0) {
-        // Nomor HP — tambah kode +62 otomatis kalau belum ada
-        String noHp = contact;
-        if (!noHp.startsWith('+')) {
-          if (noHp.startsWith('0')) noHp = noHp.substring(1);
-          noHp = '+62$noHp';
-        }
-        await Supabase.instance.client.auth.signInWithOtp(phone: noHp);
+      if (_otpChannel == 2) {
+        // EMAIL
+        await Supabase.instance.client.auth.resetPasswordForEmail(kontak);
+        _emailTersimpan = kontak;
       } else {
-        // Email
-        await Supabase.instance.client.auth.signInWithOtp(email: contact);
+        // WA atau SMS — pakai nomor HP
+        final noHp = _formatNoHp(kontak);
+        await Supabase.instance.client.auth.signInWithOtp(phone: noHp);
+        _nomorTersimpan = noHp;
       }
-      
-      setState(() {
-        _isVerifyOtpMode = true;
-        _verificationId = null;
-      });
-      
+
+      setState(() => _isVerifyMode = true);
+
+      String cara = '';
+      switch (_otpChannel) {
+        case 0: cara = 'WhatsApp'; break;
+        case 1: cara = 'SMS'; break;
+        case 2: cara = 'Email'; break;
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kode dikirim! Cek SMS/Email kamu ✅')),
+          SnackBar(content: Text('Kode dikirim lewat $cara ✅ Cek segera!')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal kirim kode: $e')),
+          SnackBar(content: Text('Gagal kirim: $e')),
         );
       }
     }
+
     setState(() => _isLoading = false);
   }
 
   // === VERIFIKASI OTP ===
-  Future<void> _verifyOtp() async {
-    final contact = _selectedAuthTab == 0 
-        ? _noHpController.text.trim() 
-        : _emailController.text.trim();
-    final otp = _otpController.text.trim();
-    if (otp.isEmpty) return;
+  Future<void> _cekOTP() async {
+    final kode = _otpController.text.trim();
+    if (kode.isEmpty) return;
 
     setState(() => _isLoading = true);
+
     try {
-      if (_selectedAuthTab == 0) {
-        String noHp = contact;
-        if (!noHp.startsWith('+')) {
-          if (noHp.startsWith('0')) noHp = noHp.substring(1);
-          noHp = '+62$noHp';
-        }
+      if (_otpChannel == 2 && _emailTersimpan != null) {
+        // Email — untuk reset, langsung lanjut buat sandi baru
         await Supabase.instance.client.auth.verifyOTP(
-          phone: noHp,
-          token: otp,
-          type: OtpType.sms,
+          email: _emailTersimpan!,
+          token: kode,
+          type: OtpType.recovery,
         );
-      } else {
+      } else if (_nomorTersimpan != null) {
+        // HP — WA/SMS
         await Supabase.instance.client.auth.verifyOTP(
-          email: contact,
-          token: otp,
-          type: OtpType.magiclink,
+          phone: _nomorTersimpan!,
+          token: kode,
+          type: OtpType.sms,
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kode salah atau kadaluarsa: $e')),
+          SnackBar(content: Text('Kode salah/kadaluarsa: $e')),
         );
       }
     }
+
     setState(() => _isLoading = false);
   }
 
-  // === DAFTAR PENUH DENGAN SANDI ===
-  Future<void> _registerWithPassword() async {
+  // === DAFTAR ===
+  Future<void> _daftar() async {
     if (_passController.text != _confirmPassController.text) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kata sandi tidak cocok! ❌')),
+        const SnackBar(content: Text('Sandi tidak cocok! ❌')),
       );
       return;
     }
     if (_passController.text.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Kata sandi minimal 6 karakter!')),
+        const SnackBar(content: Text('Sandi minimal 6 karakter')),
       );
       return;
     }
@@ -173,42 +185,32 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       final nama = _namaController.text.trim();
-      
-      if (_selectedAuthTab == 0) {
-        String noHp = _noHpController.text.trim();
-        if (!noHp.startsWith('+')) {
-          if (noHp.startsWith('0')) noHp = noHp.substring(1);
-          noHp = '+62$noHp';
-        }
+      final kontak = _kontakController.text.trim();
+
+      if (kontak.contains('@')) {
+        // Daftar pakai Email
         await Supabase.instance.client.auth.signUp(
-          phone: noHp,
+          email: kontak,
           password: _passController.text,
           data: {'name': nama},
         );
-        // Simpan profil
-        final uid = Supabase.instance.client.auth.currentUser?.id;
-        if (uid != null) {
-          await Supabase.instance.client.from('profiles').upsert({
-            'id': uid,
-            'name': nama,
-          });
-        }
       } else {
-        final email = _emailController.text.trim();
+        // Daftar pakai No HP
         await Supabase.instance.client.auth.signUp(
-          email: email,
+          phone: _formatNoHp(kontak),
           password: _passController.text,
           data: {'name': nama},
         );
-        final uid = Supabase.instance.client.auth.currentUser?.id;
-        if (uid != null) {
-          await Supabase.instance.client.from('profiles').upsert({
-            'id': uid,
-            'name': nama,
-          });
-        }
       }
-      
+
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      if (uid != null) {
+        await Supabase.instance.client.from('profiles').upsert({
+          'id': uid,
+          'name': nama,
+        });
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Berhasil daftar! 🎉')),
@@ -224,23 +226,20 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
   }
 
-  // === MASUK DENGAN SANDI ===
-  Future<void> _loginWithPassword() async {
+  // === MASUK ===
+  Future<void> _masuk() async {
     setState(() => _isLoading = true);
     try {
-      if (_selectedAuthTab == 0) {
-        String noHp = _noHpController.text.trim();
-        if (!noHp.startsWith('+')) {
-          if (noHp.startsWith('0')) noHp = noHp.substring(1);
-          noHp = '+62$noHp';
-        }
+      final kontak = _kontakController.text.trim();
+
+      if (kontak.contains('@')) {
         await Supabase.instance.client.auth.signInWithPassword(
-          phone: noHp,
+          email: kontak,
           password: _passController.text,
         );
       } else {
         await Supabase.instance.client.auth.signInWithPassword(
-          email: _emailController.text.trim(),
+          phone: _formatNoHp(kontak),
           password: _passController.text,
         );
       }
@@ -254,48 +253,6 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
   }
 
-  // === LUPA SANDI ===
-  Future<void> _sendResetOtp() async {
-    final contact = _selectedAuthTab == 0 
-        ? _noHpController.text.trim() 
-        : _emailController.text.trim();
-    if (contact.isEmpty) return;
-
-    setState(() => _isLoading = true);
-    try {
-      if (_selectedAuthTab == 1) {
-        await Supabase.instance.client.auth.resetPasswordForEmail(contact);
-      } else {
-        // Untuk HP — kirim OTP dulu
-        String noHp = contact;
-        if (!noHp.startsWith('+')) {
-          if (noHp.startsWith('0')) noHp = noHp.substring(1);
-          noHp = '+62$noHp';
-        }
-        await Supabase.instance.client.auth.signInWithOtp(phone: noHp);
-      }
-      
-      setState(() {
-        _isForgotMode = true;
-        _resetTarget = contact;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Kode dikirim! Cek SMS/Email ✅')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal kirim kode: $e')),
-        );
-      }
-    }
-    setState(() => _isLoading = false);
-  }
-
-  // === TAMPILAN UTAMA ===
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -312,139 +269,189 @@ class _LoginScreenState extends State<LoginScreen> {
                 const Text('TeguhAi', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.green)),
                 const SizedBox(height: 24),
 
-                // === PILIHAN: NO HP / EMAIL ===
-                if (!_isVerifyOtpMode && !_isForgotMode)
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextButton(
-                            style: TextButton.styleFrom(
-                              backgroundColor: _selectedAuthTab == 0 ? Colors.green : Colors.transparent,
-                              foregroundColor: _selectedAuthTab == 0 ? Colors.white : Colors.grey,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            onPressed: () => setState(() => _selectedAuthTab = 0),
-                            child: const Text('📱 No. HP', style: TextStyle(fontSize: 15)),
-                          ),
-                        ),
-                        Expanded(
-                          child: TextButton(
-                            style: TextButton.styleFrom(
-                              backgroundColor: _selectedAuthTab == 1 ? Colors.green : Colors.transparent,
-                              foregroundColor: _selectedAuthTab == 1 ? Colors.white : Colors.grey,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            onPressed: () => setState(() => _selectedAuthTab = 1),
-                            child: const Text('✉️ Email', style: TextStyle(fontSize: 15)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                const SizedBox(height: 20),
-
-                // === BAGIAN FORM ===
-                if (_isVerifyOtpMode) ...[
+                // === LAYAR VERIFIKASI OTP ===
+                if (_isVerifyMode) ...[
                   const Text('Masukkan Kode OTP', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text('Kode dikirim lewat ${_otpChannel == 0 ? "WhatsApp" : _otpChannel == 1 ? "SMS" : "Email"}',
+                      style: const TextStyle(color: Colors.grey)),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _otpController,
                     keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 24, letterSpacing: 10),
                     decoration: const InputDecoration(
-                      labelText: 'Kode dari SMS/Email',
+                      labelText: 'Kode 6 angka',
                       border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
                     ),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 22, letterSpacing: 8),
                   ),
                   const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : _verifyOtp,
+                      onPressed: _isLoading ? null : () async {
+                        await _cekOTP();
+                        // Kalau dari lupa sandi & berhasil → tampilkan buat sandi baru
+                        if (_isForgotMode && Supabase.instance.client.auth.currentUser != null) {
+                          setState(() {
+                            _isVerifyMode = false;
+                            // Tetap di lupa mode untuk ubah sandi
+                          });
+                        }
+                      },
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
                       ),
-                      child: Text(_isLoading ? 'Memproses...' : 'Verifikasi', style: const TextStyle(fontSize: 16)),
+                      child: Text(_isLoading ? 'Memproses...' : 'Verifikasi Kode', style: const TextStyle(fontSize: 16)),
                     ),
                   ),
                   TextButton(
-                    onPressed: () => setState(() => _isVerifyOtpMode = false),
+                    onPressed: () {
+                      setState(() {
+                        _isVerifyMode = false;
+                        _otpChannel = null;
+                      });
+                    },
                     child: const Text('← Kembali'),
                   ),
+
+                // === LAYAR LUPA SANDI — PILIHAN KIRIM ===
                 ] else if (_isForgotMode) ...[
-                  const Text('Reset Kata Sandi', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _otpController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Kode OTP',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _passController,
-                    obscureText: _obscurePass,
-                    decoration: InputDecoration(
-                      labelText: 'Kata Sandi Baru',
-                      prefixIcon: const Icon(Icons.lock),
-                      suffixIcon: IconButton(
-                        icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility),
-                        onPressed: () => setState(() => _obscurePass = !_obscurePass),
-                      ),
-                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _confirmPassController,
-                    obscureText: _obscureConfirm,
-                    decoration: InputDecoration(
-                      labelText: 'Konfirmasi Sandi Baru',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility),
-                        onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                      ),
-                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                    ),
-                  ),
+                  const Text('Lupa Kata Sandi', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Masukkan nomor atau email, lalu pilih cara kirim kode',
+                      textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
                   const SizedBox(height: 20),
+
+                  TextField(
+                    controller: _kontakController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nomor HP / Email',
+                      prefixIcon: Icon(Icons.alternate_email),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      hintText: '0812... atau email@contoh.com',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  const Text('Pilih cara terima kode:', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+
+                  // === 3 PILIHAN ===
+                  _buildPilihanOTP(0, '💬 WhatsApp'),
+                  const SizedBox(height: 8),
+                  _buildPilihanOTP(1, '📱 SMS'),
+                  const SizedBox(height: 8),
+                  _buildPilihanOTP(2, '✉️ Email'),
+
+                  const SizedBox(height: 20),
+
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : () {
-                        if (_passController.text == _confirmPassController.text) {
-                          _verifyOtp();
-                        } else {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Sandi tidak cocok!')),
-                          );
-                        }
-                      },
+                      onPressed: _isLoading ? null : _kirimOTP,
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         backgroundColor: Colors.orange,
                         foregroundColor: Colors.white,
                       ),
-                      child: Text(_isLoading ? 'Memproses...' : 'Simpan Sandi Baru', style: const TextStyle(fontSize: 16)),
+                      child: Text(_isLoading ? 'Mengirim...' : 'Kirim Kode', style: const TextStyle(fontSize: 16)),
                     ),
                   ),
+
+                  // === BUAT SANDI BARU JIKA SUDAH VERIFIKASI ===
+                  if (Supabase.instance.client.auth.currentUser != null) ...[
+                    const SizedBox(height: 24),
+                    const Text('Buat Sandi Baru', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passController,
+                      obscureText: _obscurePass,
+                      decoration: InputDecoration(
+                        labelText: 'Sandi Baru',
+                        prefixIcon: const Icon(Icons.lock),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                        ),
+                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _confirmPassController,
+                      obscureText: _obscureConfirm,
+                      decoration: InputDecoration(
+                        labelText: 'Ulangi Sandi Baru',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
+                        ),
+                        border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : () async {
+                          if (_passController.text == _confirmPassController.text) {
+                            setState(() => _isLoading = true);
+                            try {
+                              await Supabase.instance.client.auth.updateUser(
+                                UserAttributes(password: _passController.text),
+                              );
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Sandi berhasil diubah! ✅')),
+                                );
+                                setState(() {
+                                  _isForgotMode = false;
+                                  _isLoginMode = true;
+                                });
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Gagal ubah sandi: $e')),
+                                );
+                              }
+                            }
+                            setState(() => _isLoading = false);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Sandi tidak cocok!')),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Simpan Sandi Baru', style: TextStyle(fontSize: 16)),
+                      ),
+                    ),
+                  ],
+
                   TextButton(
-                    onPressed: () => setState(() => _isForgotMode = false),
-                    child: const Text('← Kembali Masuk'),
+                    onPressed: () => setState(() {
+                      _isForgotMode = false;
+                      _otpChannel = null;
+                    }),
+                    child: const Text('← Kembali ke Masuk'),
                   ),
+
+                // === LAYAR UTAMA — MASUK / DAFTAR ===
                 ] else ...[
-                  // Nama (hanya saat Daftar)
+                  Text(_isLoginMode ? 'Masuk ke Akun' : 'Daftar Akun Baru',
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 20),
+
                   if (!_isLoginMode) ...[
                     TextField(
                       controller: _namaController,
@@ -457,20 +464,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 12),
                   ],
 
-                  // No HP atau Email
                   TextField(
-                    controller: _selectedAuthTab == 0 ? _noHpController : _emailController,
-                    keyboardType: _selectedAuthTab == 0 ? TextInputType.phone : TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: _selectedAuthTab == 0 ? 'Nomor HP' : 'Alamat Email',
-                      prefixIcon: Icon(_selectedAuthTab == 0 ? Icons.phone : Icons.email),
-                      border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                      hintText: _selectedAuthTab == 0 ? 'Contoh: 08123456789' : 'email@contoh.com',
+                    controller: _kontakController,
+                    decoration: const InputDecoration(
+                      labelText: 'Nomor HP / Email',
+                      prefixIcon: Icon(Icons.contact_page),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                      hintText: '0812... atau email@contoh.com',
                     ),
                   ),
                   const SizedBox(height: 12),
 
-                  // Kata Sandi
                   TextField(
                     controller: _passController,
                     obscureText: _obscurePass,
@@ -478,7 +482,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       labelText: 'Kata Sandi',
                       prefixIcon: const Icon(Icons.lock),
                       suffixIcon: IconButton(
-                        icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                        icon: Icon(_obscurePass ? Icons.visibility_off : Icons.visibility),
                         onPressed: () => setState(() => _obscurePass = !_obscurePass),
                       ),
                       border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
@@ -486,7 +490,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Konfirmasi Sandi (hanya Daftar)
                   if (!_isLoginMode)
                     TextField(
                       controller: _confirmPassController,
@@ -495,7 +498,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         labelText: 'Konfirmasi Kata Sandi',
                         prefixIcon: const Icon(Icons.lock_outline),
                         suffixIcon: IconButton(
-                          icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                          icon: Icon(_obscureConfirm ? Icons.visibility_off : Icons.visibility),
                           onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
                         ),
                         border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
@@ -503,16 +506,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   if (!_isLoginMode) const SizedBox(height: 20),
 
-                  // Tombol Utama
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isLoading ? null : (_isLoginMode ? _loginWithPassword : _registerWithPassword),
+                      onPressed: _isLoading ? null : (_isLoginMode ? _masuk : _daftar),
                       style: ElevatedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         backgroundColor: Colors.green,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: Text(
-                        _isLoading ? 'Memproses...' : (_isLoginMode ? 'Masuk' : '
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.cir
